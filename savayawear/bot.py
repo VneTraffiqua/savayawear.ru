@@ -58,7 +58,7 @@ def get_customer_name(update: Update, context: CallbackContext):
     # Пишем в журнал Имя пользователя
     logger.info("%s %s нажал: %s", user.first_name, user.last_name, update.message.text)
     update.message.reply_text(
-    'Введите ваше имя и фамилию, или отправь /skip, если передумал.',
+    'Введите ваше имя и фамилию, или отправь /cancel, если передумал.',
     reply_markup=ReplyKeyboardRemove(),
     )
     return PHONE_NUMBER
@@ -70,7 +70,7 @@ def get_phonenumber(update: Update, context: CallbackContext):
     # Пишем в журнал фио пользователя
     logger.info("Имя и фамилия %s: %s", user.username, update.message.text)
     update.message.reply_text(
-            'Введите номер телефона, или отправь /skip, если передумал.',
+            'Введите номер телефона, или отправь /cancel, если передумал.',
             reply_markup=ReplyKeyboardRemove(),
     )
     return PHOTO
@@ -194,9 +194,9 @@ def answer(update: Update, context: CallbackContext) -> None:
     env.read_env()
     tg_chat_id = env.str('TG_CHAT_ID')
     user_id = update.message.from_user.id
-    print(update.message.reply_to_message.text)
-    print(update.message.reply_to_message.forward_from.id)
-    print(update.message.reply_to_message.forward_from.first_name)
+    # print(update.message.reply_to_message.text)
+    # print(update.message.reply_to_message.forward_from.id)
+    # print(update.message.reply_to_message.forward_from.first_name)
     if user_id == tg_chat_id:
         print(user_id, '==', tg_chat_id)
         return None
@@ -207,9 +207,26 @@ def answer(update: Update, context: CallbackContext) -> None:
 
 def say_reply(update: Update, context: CallbackContext):
     update.message.reply_text(
-        'Что бы ответить менеджеру, сцитируйте его сообщение свайпом'
+        'Что бы продолжить диалог с менеджером, необходимо ответить на его сообщение, или отправь /cancel, если передумал.'
     )
     return QUESTION
+
+
+# Обрабатываем команду /cancel если пользователь отменил разговор
+def cancel(update, _):
+    # определяем пользователя
+    user = update.message.from_user
+    # Пишем в журнал о том, что пользователь не разговорчивый
+    logger.info("Пользователь %s отменил разговор.", user.first_name)
+    # Отвечаем на отказ поговорить
+    update.message.reply_text(
+        'Мое дело предложить - Ваше отказаться.'
+        ' Для возврата в главное меню нажмите /start.',
+        reply_markup=ReplyKeyboardRemove()
+    )
+    # Заканчиваем разговор.
+    return ConversationHandler.END
+
 
 if __name__ == '__main__':
     logging.basicConfig(
@@ -227,36 +244,35 @@ if __name__ == '__main__':
     # Добавляем обработчик разговоров `conv_handler`
     # dispatcher.add_handler(MessageHandler(Filters.text(['Задать вопрос']), question))
     dispatcher.add_handler(CommandHandler('start', start))
-    dispatcher.add_handler(MessageHandler(Filters.text(['Акция: 200р. за отзыв']), promotion))
+    dispatcher.add_handler(MessageHandler(Filters.text(['Акция: 200р. за отзыв']) & ~Filters.command, promotion))
     question_handler = ConversationHandler(
         entry_points=[
             MessageHandler(Filters.text(['Задать вопрос']), question)
         ],
         states={
-            QUESTION: [MessageHandler(Filters.text, forward_to_manager)],
-            RESENT_QUESTION: [MessageHandler(Filters.reply, answer), MessageHandler(Filters.text, say_reply)],
+            QUESTION: [MessageHandler(Filters.text & ~Filters.command, forward_to_manager)],
+            RESENT_QUESTION: [MessageHandler(Filters.reply & ~Filters.command, answer), MessageHandler(Filters.text, say_reply)],
         },
-        fallbacks=[CommandHandler('cancel', skip)],
+        fallbacks=[CommandHandler('cancel', cancel)],
     )
     conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(Filters.text(['Участвовать в акции']), get_customer_name),
         ],
         states={
-            NAME: [MessageHandler(Filters.text, get_customer_name), CommandHandler('skip', skip)],
-            PHONE_NUMBER: [MessageHandler(Filters.text, get_phonenumber), CommandHandler('skip', skip)],
+            NAME: [MessageHandler(Filters.text & ~Filters.command, get_customer_name)],
+            PHONE_NUMBER: [MessageHandler(Filters.text & ~Filters.command, get_phonenumber)],
             # PHONE_VALIDATOR: [MessageHandler(Filters.text, validate_phonenumber)],
-            PHOTO: [MessageHandler(Filters.regex('^(\+7|7|8)?[\s\-]?\(?[489][0-9]{2}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}$'), photo), CommandHandler('skip', skip)],
-            DOWNLOAD_PHOTO: [MessageHandler(Filters.photo | Filters.document, download_photo), CommandHandler('skip', skip)],
+            PHOTO: [MessageHandler(Filters.regex('^(\+7|7|8)?[\s\-]?\(?[489][0-9]{2}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}$'), photo)],
+            DOWNLOAD_PHOTO: [MessageHandler(Filters.photo | Filters.document, download_photo), CommandHandler('cancel', skip)],
             SUCCESS: [send_information_to_manager]
         },
-        fallbacks=[CommandHandler('cancel', skip)],
+        fallbacks=[CommandHandler('cancel', cancel)],
     )
     # Добавляем обработчик разговоров `conv_handler`
     dispatcher.add_handler(question_handler)
     dispatcher.add_handler(conv_handler)
-
-    dispatcher.add_handler(MessageHandler(Filters.reply, answer))
+    dispatcher.add_handler(MessageHandler(Filters.reply & ~Filters.command, answer))
     # Запуск бота
     updater.start_polling()
     updater.idle()
